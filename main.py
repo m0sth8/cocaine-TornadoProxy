@@ -61,7 +61,7 @@ class BasicHandler(web.RequestHandler):
         while True:
             if len(self.cache['key']) < tornado.options.options.count:
                 try:
-                    created = [Service(name) for _ in xrange(0, tornado.options.options.count - len(self.cache[name]))]
+                    created = [Service(name, raise_reconnect_failure=False) for _ in xrange(0, tornado.options.options.count - len(self.cache[name]))]
                     [logger.info("Connect to app: %s endpoint %s " % (app.servicename, app.service_endpoint))
                                     for app in created]
                     self.cache[name].extend(created)
