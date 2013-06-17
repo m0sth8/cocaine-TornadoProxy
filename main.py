@@ -1,34 +1,64 @@
 #!/usr/bin/env python
 
 import random
+from collections import defaultdict
 
 from tornado import web
 from tornado import ioloop
-import tornado.options 
+import tornado.options
 import msgpack
 import logging
 
 logger = logging.getLogger("tornado.application")
-logger.setLevel(logging.ERROR)
+logger.setLevel(logging.INFO)
 
 from cocaine.services import Service
+from cocaine.futures.chain import ChainFactory
 from cocaine.exceptions import ServiceError
 
-tornado.options.define("port", default=8088, type=int, help="listening port number")
-
 SERVICE_CACHE_COUNT = 5
+tornado.options.define("port", default=8088, type=int, help="listening port number")
+tornado.options.define("count", default=SERVICE_CACHE_COUNT, type=int, help="count of instances per service")
+
+
+def gen(obj):
+    headers = yield
+    chunk = headers.get()
+    for header, value in chunk['headers']:
+        obj.add_header(header, value)
+    obj.set_status(chunk['code'])
+    while True:
+        body = yield
+        data = body.get()
+        if data is not None:
+            obj.write(data)
+        else:
+            break
+    obj.finish()
+
 
 class BasicHandler(web.RequestHandler):
 
-    cache = dict()
+    cache = defaultdict(list)
 
     def get_service(self, name):
-        if not self.cache.has_key(name):
-            try:
-                self.cache[name] = [Service(name) for _ in xrange(0,SERVICE_CACHE_COUNT)]
-            except Exception as err:
-                return None
-        return random.choice(self.cache[name])
+        while True:
+            if len(self.cache['key']) < tornado.options.options.count:
+                try:
+                    created = [Service(name) for _ in xrange(0, tornado.options.options.count - len(self.cache[name]))]
+                    [logger.info("Connect to app: %s endpoint %s " % (app.servicename, app.service_endpoint)) for app in created]
+                    self.cache[name].extend(created)
+                except Exception as err:
+                    logger.error(str(err))
+                    return None
+            chosen = random.choice(self.cache[name])
+            if chosen.connected:
+                return chosen
+            else:
+                logger.warning("Service %s disconnected %s" % (chosen.servicename,
+                                                                    chosen.service_endpoint))
+                self.cache[name].remove(chosen)
+
 
     @web.asynchronous
     def get(self, name, event):
@@ -41,25 +71,19 @@ class BasicHandler(web.RequestHandler):
                             "headers" : {} }
             d['body'] = self.request.body
             d['request'] = dict((param, value[0]) for param, value in self.request.arguments.iteritems())
+            import pprint
+            pprint.pprint(d)
             fut = s.invoke(event, msgpack.packb(d))
-            fut.bind(self.on_done, self.on_error, self.on_error)
-            self.fut = fut
+            g = gen(self)
+            g.next()
+            fut.then(g.send).run()
 
-    def on_done(self, chunk):
-        for header, value in chunk['headers']:
-            self.add_header(header, value)
-        self.set_status(chunk['code'])
-        self.fut.bind(self.on_done2, self.on_error, self.on_done2)
-
-    def on_done2(self, chunk):
-        try:
-            self.write(chunk)
+    def handle(self, chunk):
+        data = chunk.get()
+        if data is not None:
+            self.write(data)
+        else:
             self.finish()
-        except Exception as err:
-            pass
-
-    def on_error(self, exceptions):
-        self.send_error(status_code=503)
 
 
 if __name__ == "__main__":
@@ -69,9 +93,3 @@ if __name__ == "__main__":
         ])
     application.listen(tornado.options.options.port, no_keep_alive=False)
     ioloop.IOLoop.instance().start()
-
-
-
-
-
-
