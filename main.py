@@ -36,6 +36,22 @@ def gen(obj):
             break
     obj.finish()
 
+def pack_httprequest(request):
+    d = dict()
+    d['meta'] = { "cookies" : dict(request.cookies),
+                  "headers" : request.headers,
+                  "host" : request.host,
+                  "method" : request.method,
+                  "path_info" : request.path,
+                  "query_string" : request.query,
+                  "remote_addr" : request.remote_ip,
+                  "url" : request.uri,
+                  "files" : request.files
+                }
+    d['body'] = request.body
+    d['request'] = dict((param, value[0]) for param, value in request.arguments.iteritems())
+    return d
+
 
 class BasicHandler(web.RequestHandler):
 
@@ -46,7 +62,8 @@ class BasicHandler(web.RequestHandler):
             if len(self.cache['key']) < tornado.options.options.count:
                 try:
                     created = [Service(name) for _ in xrange(0, tornado.options.options.count - len(self.cache[name]))]
-                    [logger.info("Connect to app: %s endpoint %s " % (app.servicename, app.service_endpoint)) for app in created]
+                    [logger.info("Connect to app: %s endpoint %s " % (app.servicename, app.service_endpoint))
+                                    for app in created]
                     self.cache[name].extend(created)
                 except Exception as err:
                     logger.error(str(err))
@@ -66,30 +83,29 @@ class BasicHandler(web.RequestHandler):
         if s is None:
             self.send_error(status_code=404)
         else:
-            d = dict()
-            d['meta'] = {   "cookie" : "",
-                            "headers" : {} }
-            d['body'] = self.request.body
-            d['request'] = dict((param, value[0]) for param, value in self.request.arguments.iteritems())
-            import pprint
-            pprint.pprint(d)
+            d = pack_httprequest(self.request)
             fut = s.invoke(event, msgpack.packb(d))
             g = gen(self)
             g.next()
             fut.then(g.send).run()
 
-    def handle(self, chunk):
-        data = chunk.get()
-        if data is not None:
-            self.write(data)
+    @web.asynchronous
+    def post(self, name, event):
+        s = self.get_service(name)
+        if s is None:
+            self.send_error(status_code=404)
         else:
-            self.finish()
+            d = pack_httprequest(self.request)
+            fut = s.invoke(event, msgpack.packb(d))
+            g = gen(self)
+            g.next()
+            fut.then(g.send).run()
 
 
 if __name__ == "__main__":
     tornado.options.parse_command_line()
     application = web.Application([
-        (r"/([^/]*)/([^/]*)", BasicHandler)
+        (r"/([^/]*)/([^/]*)", BasicHandler),
         ])
     application.listen(tornado.options.options.port, no_keep_alive=False)
     ioloop.IOLoop.instance().start()
