@@ -148,8 +148,8 @@ def gen(obj):
 
 def pack_httprequest(request):
     d = dict()
-    d['meta'] = { "cookies" : dict(request.cookies),
-                  "headers" : request.headers,
+    d['meta'] = { #"cookies" : dict(request.cookies),
+                  "headers" : dict(request.headers),
                   "host" : request.host,
                   "method" : request.method,
                   "path_info" : request.path,
