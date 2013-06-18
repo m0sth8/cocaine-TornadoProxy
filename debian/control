@@ -1,0 +1,18 @@
+Source: cocaine-tornado-proxy
+Section: misc
+Priority: extra
+Maintainer: Anton Tyurin <noxiouz@yandex-team.ru>
+Build-Depends: debhelper (>= 7), cdbs, python-central, python-setuptools
+Standards-Version: 3.9.1
+XS-Python-Version: >= 2.6
+Homepage: https://github.com/noxiouz/cocaine-TornadoProxy
+
+Package: cocaine-tornado-proxy
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends},
+ python-tornado,
+ python-msgpack | msgpack-python,
+ cocaine-framewrok-python (>=0.10.4-4)
+XB-Python-Version: >= 2.6
+Description: Tornado-based cocaine HTTP proxy
+ <insert long description, indented with spaces>
