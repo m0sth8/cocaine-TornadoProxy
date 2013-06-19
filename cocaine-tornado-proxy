@@ -162,7 +162,7 @@ actions = tornado.options.parse_command_line()
 
 def gen(obj, timeouthandler):
     headers = yield
-    chunk = headers.get()
+    chunk = msgpack.unpackb(headers.get())
     for header, value in chunk['headers']:
         obj.add_header(header, value)
     obj.set_status(chunk['code'])
