@@ -6,6 +6,7 @@ import atexit
 import sys
 import logging
 import time
+from functools import partial
 from signal import SIGTERM
 from collections import defaultdict
 
@@ -15,7 +16,6 @@ import tornado.options
 import msgpack
 
 from cocaine.services import Service
-from cocaine.futures.chain import ChainFactory
 from cocaine.exceptions import ServiceError
 
 logger = logging.getLogger("tornado.application")
@@ -160,7 +160,7 @@ tornado.options.define("pidfile", default="/var/run/tornado", type=str, help="pi
 actions = tornado.options.parse_command_line()
 
 
-def gen(obj):
+def gen(obj, timeouthandler):
     headers = yield
     chunk = headers.get()
     for header, value in chunk['headers']:
@@ -185,6 +185,11 @@ def pack_httprequest(request):
     d['body'] = request.body
     d['request'] = dict((param, value[0]) for param, value in request.arguments.iteritems())
     return d
+
+def answer_timeout(request_obj):
+    if not request_obj._finished:
+        request_obj.clear()
+        request_obj.send_error(status_code=504)
 
 
 class BasicHandler(web.RequestHandler):
@@ -218,23 +223,18 @@ class BasicHandler(web.RequestHandler):
         if s is None:
             self.send_error(status_code=404)
         else:
-            d = pack_httprequest(self.request)
-            fut = s.invoke(event, msgpack.packb(d))
-            g = gen(self)
+            timeout_caller = ioloop.IOLoop.instance().add_timeout(time.time() + 0.5,\
+                                                                    partial(answer_timeout, self))
+            data = pack_httprequest(self.request)
+            fut = s.invoke(event, msgpack.packb(data))
+            g = gen(self, timeout_caller)
             g.next()
             fut.then(g.send).run()
 
     @web.asynchronous
     def post(self, name, event):
-        s = self.get_service(name)
-        if s is None:
-            self.send_error(status_code=404)
-        else:
-            d = pack_httprequest(self.request)
-            fut = s.invoke(event, msgpack.packb(d))
-            g = gen(self)
-            g.next()
-            fut.then(g.send).run()
+        self.get(name, event)
+
 
 def main():
     application = web.Application([
