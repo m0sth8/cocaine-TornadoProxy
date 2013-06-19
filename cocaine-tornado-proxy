@@ -5,6 +5,8 @@ import os
 import atexit
 import sys
 import logging
+import time
+from signal import SIGTERM
 from collections import defaultdict
 
 from tornado import web
@@ -116,10 +118,32 @@ class Daemon(object):
             if err.find("No such process") > 0:
                 if os.path.exists(self.pidfile):
                     os.remove(self.pidfile)
+                sys.stdout.write("Process %d has been stoped succefully\n" % pid)
             else:
                 print str(err)
                 sys.exit(1)
 
+    def status(self):
+        try:
+            with file(self.pidfile, 'r') as pf:
+                pid = int(pf.read().strip())
+        except IOError:
+            pid = None
+
+        if not pid:
+            msg = "Stopped\n"
+            sys.stderr.write(msg)
+            sys.exit(1)
+
+        try:
+            os.kill(pid, 0)
+        except OSError as err:
+            msg = "Stopped\n"
+            sys.stderr.write(msg)
+            sys.exit(1)
+
+        sys.stdout.write("Running. PID %d\n" % pid)
+        sys.exit(0)
 
     def restart(self, *args):
         self.stop()
@@ -132,8 +156,8 @@ SERVICE_CACHE_COUNT = 5
 tornado.options.define("port", default=8088, type=int, help="listening port number")
 tornado.options.define("count", default=SERVICE_CACHE_COUNT, type=int, help="count of instances per service")
 tornado.options.define("daemon", default=False, type=bool, help="daemonize")
-tornado.options.define("pidfile", default="/var/run/tornado", type=str, help="pid")
-tornado.options.parse_command_line()
+tornado.options.define("pidfile", default="/var/run/tornado", type=str, help="pidfile")
+actions = tornado.options.parse_command_line()
 
 
 def gen(obj):
@@ -148,7 +172,7 @@ def gen(obj):
 
 def pack_httprequest(request):
     d = dict()
-    d['meta'] = { #"cookies" : dict(request.cookies),
+    d['meta'] = { "cookies" : dict((item.key, item.value) for item in request.cookies.itervalues()),
                   "headers" : dict(request.headers),
                   "host" : request.host,
                   "method" : request.method,
@@ -171,7 +195,8 @@ class BasicHandler(web.RequestHandler):
         while True:
             if len(self.cache['key']) < tornado.options.options.count:
                 try:
-                    created = [Service(name, raise_reconnect_failure=False) for _ in xrange(0, tornado.options.options.count - len(self.cache[name]))]
+                    created = [Service(name, raise_reconnect_failure=False)
+                                    for _ in xrange(0, tornado.options.options.count - len(self.cache[name]))]
                     [logger.info("Connect to app: %s endpoint %s " % (app.servicename, app.service_endpoint))
                                     for app in created]
                     self.cache[name].extend(created)
@@ -220,8 +245,22 @@ def main():
 
 if __name__ == "__main__":
     if tornado.options.options.daemon:
-        d = Daemon(tornado.options.options.pidfile+str(tornado.options.options.port))
-        d.run = main
-        d.start()
+        if "start" in actions:
+            d = Daemon(tornado.options.options.pidfile)
+            d.run = main
+            d.start()
+        elif "stop" in actions:
+            d = Daemon(tornado.options.options.pidfile)
+            d.stop()
+        elif "restart" in actions:
+            d = Daemon(tornado.options.options.pidfile)
+            d.run = main
+            d.restart()
+        elif "status" in actions:
+            d = Daemon(tornado.options.options.pidfile)
+            d.status()
+        else:
+            print("start|stop|restart|status")
+            sys.exit(0)
     else:
         main()
